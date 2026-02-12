@@ -1,0 +1,105 @@
+.container {
+  min-height: 100vh;
+  background-color: var(--color-bg);
+}
+
+.authContainer {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 20px;
+}
+
+.logo {
+  font-size: 4rem;
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+.subtitle {
+  font-size: 1.5rem;
+  color: var(--color-text-secondary);
+  margin-bottom: 3rem;
+  text-align: center;
+}
+
+.authButtons {
+  display: flex;
+  gap: 1rem;
+}
+
+.button {
+  padding: 1rem 2rem;
+  background-color: var(--color-primary);
+  color: var(--color-text);
+  border: none;
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.2s;
+
+  &:hover {
+    background-color: var(--color-primary-hover);
+  }
+}
+
+.buttonOutline {
+  padding: 1rem 2rem;
+  background-color: transparent;
+  color: var(--color-text);
+  border: 2px solid var(--color-primary);
+  border-radius: 8px;
+  font-size: 1rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s;
+
+  &:hover {
+    background-color: var(--color-primary);
+  }
+}
+
+.main {
+  max-width: 1200px;
+  margin: 0 auto;
+  padding: 2rem;
+}
+
+.recordSection {
+  display: flex;
+  justify-content: center;
+  margin-bottom: 3rem;
+}
+
+.recordButton {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  padding: 1.5rem 3rem;
+  background-color: var(--color-primary);
+  color: var(--color-text);
+  border: none;
+  border-radius: 50px;
+  font-size: 1.25rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s;
+  box-shadow: 0 4px 20px rgba(255, 0, 0, 0.3);
+
+  &:hover {
+    background-color: var(--color-primary-hover);
+    transform: translateY(-2px);
+    box-shadow: 0 6px 30px rgba(255, 0, 0, 0.4);
+  }
+
+  &:active {
+    transform: translateY(0);
+  }
+}
+
+.recordIcon {
+  font-size: 2rem;
+}

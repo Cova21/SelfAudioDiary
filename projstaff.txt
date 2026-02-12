@@ -1,0 +1,1870 @@
+═══════════════════════════════════════════════════════════════════
+  ПОДРОБНОЕ ОПИСАНИЕ ПРОЕКТА: Voice Diary with AI
+  Дата создания: 30 января 2026
+  Архитектура: Микросервисная
+═══════════════════════════════════════════════════════════════════
+
+╔══════════════════════════════════════════════════════════════════╗
+║                    ОБЩАЯ АРХИТЕКТУРА ПРОЕКТА                     ║
+╚══════════════════════════════════════════════════════════════════╝
+
+Проект представляет собой ПОЛНОФУНКЦИОНАЛЬНОЕ веб-приложение для 
+ведения голосового дневника с автоматической транскрипцией и 
+AI-анализом эмоций.
+
+КОМПОНЕНТЫ:
+├── 6 Go микросервисов (Backend)
+├── 2 Python AI сервиса (Искусственный интеллект)
+├── 1 Next.js приложение (Frontend)
+├── 1 Nginx (Reverse Proxy)
+└── 7 Инфраструктурных сервисов (БД, кеш, очереди)
+
+ВСЕГО: 17 Docker контейнеров
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║                        FRONTEND (Next.js)                        ║
+╚══════════════════════════════════════════════════════════════════╝
+
+ТЕХНОЛОГИИ:
+- Next.js 14 с App Router (современная серверная маршрутизация)
+- React 18 (пользовательский интерфейс)
+- TypeScript (типизация)
+- CSS Modules + SCSS (стилизация)
+- Web Audio API (запись звука в браузере)
+- Axios (HTTP запросы)
+
+ПОРТЫ:
+- 3000 - Доступ напрямую к Next.js
+- 80 (через Nginx) - Основной доступ
+
+СТРУКТУРА КОМПОНЕНТОВ:
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. ГЛАВНАЯ СТРАНИЦА (app/page.tsx)                             │
+└─────────────────────────────────────────────────────────────────┘
+
+ФУНКЦИИ:
+→ checkAuthentication()
+  - Проверяет наличие токена в localStorage
+  - Если токена нет - показывает экран входа
+  - Если есть - показывает главный интерфейс
+  
+→ handleRecordingComplete()
+  - Вызывается после завершения записи
+  - Обновляет список записей (refreshEntries++)
+  - Возвращает в режим просмотра
+
+→ handleRecordingStart()
+  - Переключает интерфейс в режим записи
+  - Показывает компонент AudioRecorder
+
+КАК РАБОТАЕТ:
+1. При загрузке проверяет localStorage на наличие accessToken
+2. Если токена нет - отображает кнопки "Войти" / "Регистрация"
+3. Если токен есть - показывает Header + кнопку "Новая запись"
+4. По клику на "Новая запись" показывает AudioRecorder
+5. После записи обновляет список EntryList
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. КОМПОНЕНТ HEADER (components/Header/Header.tsx)             │
+└─────────────────────────────────────────────────────────────────┘
+
+ФУНКЦИИ:
+→ handleLogout()
+  - Удаляет токены из localStorage
+  - Перенаправляет на страницу входа
+  
+→ displayUserInfo()
+  - Показывает имя пользователя (если есть)
+  - Отображает кнопку выхода
+
+КАК РАБОТАЕТ:
+- Всегда видна вверху страницы
+- Показывает логотип "🎙️ Voice Diary"
+- Кнопка "Выйти" справа
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. КОМПОНЕНТ AUDIORECORDER                                      │
+│    (components/AudioRecorder/AudioRecorder.tsx)                 │
+└─────────────────────────────────────────────────────────────────┘
+
+ФУНКЦИИ:
+→ startRecording()
+  - Запрашивает доступ к микрофону через navigator.mediaDevices
+  - Создает MediaRecorder с MIME type "audio/webm"
+  - Начинает запись аудио
+  - Запускает таймер записи
+  
+→ stopRecording()
+  - Останавливает MediaRecorder
+  - Создает Blob из записанных chunks
+  - Вызывает uploadAudio()
+  
+→ uploadAudio(audioBlob)
+  - Создает FormData с audio file
+  - Отправляет POST /api/entries/upload
+  - Получает entry_id и audio_file_id
+  - Показывает уведомление об успехе
+  
+→ pauseRecording() / resumeRecording()
+  - Ставит запись на паузу
+  - Возобновляет запись
+  
+→ updateTimer()
+  - Обновляет таймер каждую секунду
+  - Формат: MM:SS
+  - Максимум: 10 минут (600 секунд)
+
+КАК РАБОТАЕТ:
+1. Пользователь кликает "Новая запись"
+2. Компонент запрашивает разрешение на микрофон
+3. После разрешения начинает запись
+4. Показывает визуализацию звуковой волны (опционально)
+5. Таймер отсчитывает время
+6. Кнопки: "Пауза", "Продолжить", "Остановить", "Отмена"
+7. При остановке создается Blob и отправляется на сервер
+8. После успешной загрузки возвращает в главное меню
+
+ТЕХНИЧЕСКИЕ ДЕТАЛИ:
+- MediaRecorder API для записи
+- Chunks собираются в массив
+- При остановке chunks → Blob → FormData
+- Максимальная длина: 10 минут
+- Формат: audio/webm или audio/mp4
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 4. КОМПОНЕНТ ENTRYLIST                                          │
+│    (components/EntryList/EntryList.tsx)                         │
+└─────────────────────────────────────────────────────────────────┘
+
+ФУНКЦИИ:
+→ fetchEntries()
+  - GET запрос на /api/entries
+  - Получает список всех записей пользователя
+  - Сортирует по дате (новые первыми)
+  
+→ playAudio(entryId, audioFileId)
+  - Загружает аудио файл из storage
+  - Создает Audio объект
+  - Воспроизводит звук
+  - Показывает прогресс воспроизведения
+  
+→ deleteEntry(entryId)
+  - Показывает подтверждение
+  - DELETE запрос на /api/entries/{id}
+  - Обновляет список после удаления
+  
+→ formatDuration(ms)
+  - Конвертирует миллисекунды в MM:SS
+  - Пример: 125000 → "02:05"
+  
+→ formatDate(timestamp)
+  - Конвертирует Unix timestamp в читаемую дату
+  - Пример: "30 января 2026, 14:35"
+
+КАК РАБОТАЕТ:
+1. При монтировании загружает список записей
+2. Отображает карточки записей:
+   - Дата и время
+   - Длительность аудио
+   - Транскрипция (если готова)
+   - Эмоции (если обработаны)
+   - Кнопка "Воспроизвести"
+   - Кнопка "Удалить"
+3. При клике на "Воспроизвести":
+   - Загружает аудио
+   - Показывает прогресс-бар
+   - Синхронизирует текст с аудио (если есть segments)
+4. Автоматически обновляется при добавлении новых записей
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 5. СТРАНИЦЫ АВТОРИЗАЦИИ                                         │
+└─────────────────────────────────────────────────────────────────┘
+
+A) LOGIN (app/auth/login/page.tsx)
+
+ФУНКЦИИ:
+→ handleLogin(email, password)
+  - POST /api/auth/login
+  - Получает accessToken и refreshToken
+  - Сохраняет в localStorage
+  - Перенаправляет на главную
+  
+→ validateEmail(email)
+  - Проверяет формат email
+  - Regex: /^[^\s@]+@[^\s@]+\.[^\s@]+$/
+  
+→ showError(message)
+  - Показывает ошибку под формой
+  - Автоматически скрывается через 5 секунд
+
+КАК РАБОТАЕТ:
+1. Форма с полями email и password
+2. Валидация на стороне клиента
+3. Отправка на сервер
+4. Если успешно - сохранение токенов
+5. Редирект на главную страницу
+6. Если ошибка - показ сообщения
+
+B) REGISTER (app/auth/register/page.tsx)
+
+ФУНКЦИИ:
+→ handleRegister(email, password, name)
+  - POST /api/auth/register
+  - Создает нового пользователя
+  - Автоматически логинит после регистрации
+  
+→ validatePassword(password)
+  - Минимум 8 символов
+  - Должна содержать буквы и цифры
+  
+→ checkPasswordMatch(password, confirmPassword)
+  - Проверяет совпадение паролей
+
+КАК РАБОТАЕТ:
+1. Форма: email, name, password, confirm password
+2. Валидация всех полей
+3. Проверка совпадения паролей
+4. Отправка на сервер
+5. Автоматический вход после регистрации
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║                     BACKEND - GO МИКРОСЕРВИСЫ                    ║
+╚══════════════════════════════════════════════════════════════════╝
+
+ОБЩАЯ АРХИТЕКТУРА:
+Все Go сервисы используют CLEAN ARCHITECTURE:
+├── cmd/main.go          - Точка входа
+├── domain/              - Бизнес-логика и модели
+├── repository/          - Работа с БД
+├── service/             - Бизнес-сервисы
+└── delivery/grpc/       - gRPC handlers
+
+ОБЩИЕ КОМПОНЕНТЫ (backend/internal/pkg/):
+- config/      - Загрузка конфигурации из ENV
+- database/    - Подключение к PostgreSQL и Redis
+- grpcutil/    - Утилиты для gRPC клиента и сервера
+- logger/      - Структурированное логирование (Zap)
+- middleware/  - Middleware для HTTP (CORS, Auth, Logging)
+- rabbitmq/    - Клиент для RabbitMQ
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. AUTH-SERVICE (Сервис аутентификации)                        │
+└─────────────────────────────────────────────────────────────────┘
+
+НАЗНАЧЕНИЕ:
+Управление пользователями, регистрация, вход, JWT токены
+
+ПОРТЫ:
+- 50051 - gRPC сервер
+- 8081  - HTTP health check
+
+БАЗА ДАННЫХ:
+- PostgreSQL (postgres-auth:5432)
+  Таблица: users
+  Поля: id, email, password_hash, name, created_at, updated_at
+
+- Redis (redis:6379)
+  Сохранение сессий: session:{user_id} → {token_data}
+  TTL: 24 часа
+
+ФУНКЦИИ:
+
+→ Register(email, password, name)
+  ЧТО ДЕЛАЕТ:
+  1. Проверяет, существует ли email
+  2. Хеширует пароль через bcrypt (cost=10)
+  3. Создает запись в БД users
+  4. Возвращает user_id
+
+→ Login(email, password)
+  ЧТО ДЕЛАЕТ:
+  1. Ищет пользователя по email
+  2. Проверяет пароль через bcrypt.CompareHashAndPassword
+  3. Генерирует JWT access token (срок: 15 минут)
+  4. Генерирует JWT refresh token (срок: 7 дней)
+  5. Сохраняет сессию в Redis
+  6. Возвращает оба токена
+
+→ ValidateToken(token)
+  ЧТО ДЕЛАЕТ:
+  1. Парсит JWT token
+  2. Проверяет подпись (HMAC-SHA256)
+  3. Проверяет срок действия (exp claim)
+  4. Извлекает user_id из payload
+  5. Проверяет наличие сессии в Redis
+  6. Возвращает user_id
+
+→ RefreshToken(refreshToken)
+  ЧТО ДЕЛАЕТ:
+  1. Валидирует refresh token
+  2. Генерирует новый access token
+  3. Обновляет сессию в Redis
+  4. Возвращает новый access token
+
+→ Logout(userID)
+  ЧТО ДЕЛАЕТ:
+  1. Удаляет сессию из Redis
+  2. Инвалидирует все токены пользователя
+
+gRPC МЕТОДЫ (internal/protobuf/auth.proto):
+- Register(RegisterRequest) → RegisterResponse
+- Login(LoginRequest) → LoginResponse
+- ValidateToken(ValidateTokenRequest) → ValidateTokenResponse
+- RefreshToken(RefreshTokenRequest) → RefreshTokenResponse
+- Logout(LogoutRequest) → LogoutResponse
+
+КАК РАБОТАЕТ JWT:
+1. JWT состоит из 3 частей: Header.Payload.Signature
+2. Header: {"alg":"HS256","typ":"JWT"}
+3. Payload: {"user_id":123,"exp":1738262400}
+4. Signature: HMACSHA256(base64(header)+"."+base64(payload), secret)
+5. Токен проверяется при каждом запросе
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. DIARY-SERVICE (Основной сервис записей)                     │
+└─────────────────────────────────────────────────────────────────┘
+
+НАЗНАЧЕНИЕ:
+Управление голосовыми записями дневника
+
+ПОРТЫ:
+- 50052 - gRPC сервер
+- 8082  - HTTP health check
+
+БАЗА ДАННЫХ:
+- PostgreSQL (postgres-diary:5432)
+  Таблица: entries
+  Поля: 
+    - id, user_id, title, content
+    - audio_file_id, audio_duration_ms
+    - transcription, transcription_status
+    - segments (JSONB) - тайм-коды текста
+    - sentiment, emotions (JSONB), keywords (JSONB)
+    - created_at, updated_at
+
+ЗАВИСИМОСТИ:
+- RabbitMQ - для постановки задач на транскрипцию
+- Storage Service - для хранения аудио файлов
+- Search Service - для индексации записей
+
+ФУНКЦИИ:
+
+→ CreateEntry(userID, title)
+  ЧТО ДЕЛАЕТ:
+  1. Создает новую запись в БД
+  2. Статус транскрипции: "pending"
+  3. Возвращает entry_id
+  4. Ждет загрузки аудио
+
+→ UploadAudio(entryID, userID, audioFile)
+  ЧТО ДЕЛАЕТ:
+  1. Вызывает Storage Service для сохранения аудио
+  2. Получает audio_file_id
+  3. Обновляет entry: audio_file_id, audio_duration_ms
+  4. Публикует сообщение в RabbitMQ queue "transcription_queue"
+     Message: {entry_id, user_id, audio_file_id}
+  5. Меняет статус на "processing"
+  6. Возвращает успех
+
+→ GetEntry(entryID, userID)
+  ЧТО ДЕЛАЕТ:
+  1. Проверяет, что entry принадлежит user
+  2. Загружает из БД
+  3. Если есть audio_file_id, получает download URL
+  4. Возвращает полную информацию
+
+→ ListEntries(userID, limit, offset)
+  ЧТО ДЕЛАЕТ:
+  1. SELECT * FROM entries WHERE user_id = ?
+  2. ORDER BY created_at DESC
+  3. LIMIT ? OFFSET ?
+  4. Возвращает массив записей
+
+→ UpdateEntry(entryID, userID, title, content)
+  ЧТО ДЕЛАЕТ:
+  1. Проверяет владельца
+  2. UPDATE entries SET ... WHERE id=? AND user_id=?
+  3. Возвращает обновленную запись
+
+→ DeleteEntry(entryID, userID)
+  ЧТО ДЕЛАЕТ:
+  1. Проверяет владельца
+  2. Удаляет аудио через Storage Service
+  3. Удаляет из Elasticsearch через Search Service
+  4. DELETE FROM entries WHERE id=? AND user_id=?
+  5. Возвращает успех
+
+→ UpdateTranscription(entryID, transcription, segments, language)
+  ЧТО ДЕЛАЕТ:
+  1. Вызывается из Transcription Service через RabbitMQ
+  2. UPDATE entries SET transcription=?, segments=?, status="completed"
+  3. Публикует в очередь "nlp_queue" для анализа эмоций
+  4. Публикует в "search_index_queue" для индексации
+
+→ UpdateNLPAnalysis(entryID, sentiment, emotions, keywords, summary)
+  ЧТО ДЕЛАЕТ:
+  1. Вызывается из NLP Service через RabbitMQ
+  2. UPDATE entries SET sentiment=?, emotions=?, keywords=?
+  3. Публикует уведомление для пользователя
+
+gRPC МЕТОДЫ (internal/protobuf/diary.proto):
+- CreateEntry(CreateEntryRequest) → CreateEntryResponse
+- GetEntry(GetEntryRequest) → GetEntryResponse
+- ListEntries(ListEntriesRequest) → ListEntriesResponse
+- UpdateEntry(UpdateEntryRequest) → UpdateEntryResponse
+- DeleteEntry(DeleteEntryRequest) → DeleteEntryResponse
+- UpdateTranscription(...) → ...
+- UpdateNLPAnalysis(...) → ...
+
+RABBITMQ CONSUMERS:
+→ StartTranscriptionConsumer()
+  - Слушает очередь "transcription_completed"
+  - При получении сообщения обновляет transcription
+  - Запускает NLP анализ
+
+→ StartNLPConsumer()
+  - Слушает очередь "nlp_completed"
+  - При получении сообщения обновляет emotions, sentiment
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. STORAGE-SERVICE (Сервис хранения файлов)                    │
+└─────────────────────────────────────────────────────────────────┘
+
+НАЗНАЧЕНИЕ:
+Управление аудио файлами в MinIO (S3-совместимое хранилище)
+
+ПОРТЫ:
+- 50053 - gRPC сервер
+- 8083  - HTTP health check
+
+ХРАНИЛИЩЕ:
+- MinIO (minio:9000)
+  Bucket: voice-diary-audio
+  Структура: {user_id}/{audio_file_id}.webm
+
+ФУНКЦИИ:
+
+→ UploadFile(userID, file, contentType)
+  ЧТО ДЕЛАЕТ:
+  1. Генерирует уникальный file_id (UUID)
+  2. Определяет путь: {user_id}/{file_id}
+  3. Загружает файл в MinIO через PutObject
+  4. Сохраняет метаданные: content_type, size, created_at
+  5. Возвращает file_id и download_url
+
+→ GenerateUploadURL(userID, filename, contentType)
+  ЧТО ДЕЛАЕТ:
+  1. Генерирует file_id
+  2. Создает presigned URL для прямой загрузки
+  3. Срок действия URL: 15 минут
+  4. Клиент может загрузить напрямую в MinIO
+  5. Возвращает upload_url и file_id
+
+→ GenerateDownloadURL(fileID)
+  ЧТО ДЕЛАЕТ:
+  1. Создает presigned URL для скачивания
+  2. Срок действия: 1 час
+  3. URL содержит временный токен доступа
+  4. Возвращает download_url
+
+→ DownloadFile(fileID)
+  ЧТО ДЕЛАЕТ:
+  1. Получает файл из MinIO
+  2. Стримит байты клиенту
+  3. Возвращает stream данных
+
+→ DeleteFile(fileID, userID)
+  ЧТО ДЕЛАЕТ:
+  1. Проверяет, что файл принадлежит пользователю
+  2. Удаляет из MinIO: RemoveObject(bucket, path)
+  3. Возвращает успех
+
+→ GetFileInfo(fileID)
+  ЧТО ДЕЛАЕТ:
+  1. StatObject для получения метаданных
+  2. Возвращает: size, content_type, last_modified
+
+gRPC МЕТОДЫ (internal/protobuf/storage.proto):
+- UploadFile(stream UploadFileRequest) → UploadFileResponse
+- GenerateUploadURL(...) → GenerateUploadURLResponse
+- GenerateDownloadURL(...) → GenerateDownloadURLResponse
+- DownloadFile(DownloadFileRequest) → stream DownloadFileResponse
+- DeleteFile(...) → DeleteFileResponse
+
+КАК РАБОТАЕТ MinIO:
+1. MinIO - это S3-совместимое объектное хранилище
+2. Файлы хранятся в "бакетах" (buckets)
+3. Каждый файл имеет уникальный путь (key)
+4. Presigned URLs позволяют временный доступ без credentials
+5. Поддерживает streaming для больших файлов
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 4. SEARCH-SERVICE (Сервис поиска)                              │
+└─────────────────────────────────────────────────────────────────┘
+
+НАЗНАЧЕНИЕ:
+Полнотекстовый поиск по записям через Elasticsearch
+
+ПОРТЫ:
+- 50054 - gRPC сервер
+- 8084  - HTTP health check
+
+БАЗЫ ДАННЫХ:
+- PostgreSQL (postgres-search:5432)
+  Таблица: search_index_meta
+  Поля: entry_id, user_id, indexed_at, version
+  
+- Elasticsearch (elasticsearch:9200)
+  Index: voice-diary-entries
+  Mapping:
+    - entry_id (keyword)
+    - user_id (keyword)
+    - title (text, analyzed)
+    - transcription (text, analyzed, russian analyzer)
+    - keywords (keyword array)
+    - emotions (keyword array)
+    - sentiment (keyword)
+    - created_at (date)
+
+ФУНКЦИИ:
+
+→ IndexEntry(entryID, userID, title, transcription, keywords, emotions)
+  ЧТО ДЕЛАЕТ:
+  1. Создает документ в Elasticsearch
+  2. Применяет русский анализатор для текста
+  3. Индексирует keywords как точные совпадения
+  4. Сохраняет метаданные в PostgreSQL
+  5. Возвращает успех
+
+→ Search(userID, query, filters, limit, offset)
+  ЧТО ДЕЛАЕТ:
+  1. Строит Elasticsearch query:
+     - Multi-match по title и transcription
+     - Фильтры по emotions, sentiment, date
+     - Только записи данного user
+  2. Сортировка по relevance score или date
+  3. Пагинация через from/size
+  4. Возвращает массив найденных entry_id и scores
+
+→ SearchByKeywords(userID, keywords)
+  ЧТО ДЕЛАЕТ:
+  1. Terms query по полю keywords
+  2. Возвращает entries содержащие любой из keywords
+
+→ SearchByEmotion(userID, emotion)
+  ЧТО ДЕЛАЕТ:
+  1. Term query: emotions = emotion
+  2. Возвращает все записи с данной эмоцией
+
+→ DeleteFromIndex(entryID)
+  ЧТО ДЕЛАЕТ:
+  1. Удаляет документ из Elasticsearch
+  2. Удаляет из search_index_meta
+  3. Возвращает успех
+
+→ ReindexEntry(entryID)
+  ЧТО ДЕЛАЕТ:
+  1. Получает данные из Diary Service
+  2. Обновляет документ в Elasticsearch
+  3. Обновляет version в PostgreSQL
+
+gRPC МЕТОДЫ (internal/protobuf/search.proto):
+- IndexEntry(IndexEntryRequest) → IndexEntryResponse
+- Search(SearchRequest) → SearchResponse
+- SearchByKeywords(...) → ...
+- SearchByEmotion(...) → ...
+- DeleteFromIndex(...) → ...
+
+RABBITMQ CONSUMERS:
+→ StartIndexConsumer()
+  - Слушает "search_index_queue"
+  - Автоматически индексирует новые записи
+
+КАК РАБОТАЕТ ПОИСК:
+1. Пользователь вводит запрос "встреча с друзьями"
+2. Search Service отправляет в Elasticsearch
+3. Elasticsearch анализирует текст (токенизация, стемминг)
+4. Ищет совпадения в поле transcription
+5. Ранжирует по релевантности (TF-IDF, BM25)
+6. Возвращает топ-10 результатов
+7. Search Service возвращает entry_id
+8. Frontend загружает полные записи из Diary Service
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 5. NOTIFICATION-SERVICE (Сервис уведомлений)                   │
+└─────────────────────────────────────────────────────────────────┘
+
+НАЗНАЧЕНИЕ:
+Real-time уведомления через WebSocket
+
+ПОРТЫ:
+- 50055 - gRPC сервер
+- 8085  - HTTP API
+- 8086  - WebSocket сервер
+
+ЗАВИСИМОСТИ:
+- Redis (для pub/sub между инстансами)
+- RabbitMQ (для получения событий)
+
+ФУНКЦИИ:
+
+→ ConnectWebSocket(userID)
+  ЧТО ДЕЛАЕТ:
+  1. Принимает WebSocket подключение
+  2. Аутентифицирует по токену
+  3. Сохраняет connection в map: user_id → []connections
+  4. Подписывается на Redis channel: notifications:{user_id}
+  5. Начинает слушать сообщения
+
+→ SendNotification(userID, type, message, data)
+  ЧТО ДЕЛАЕТ:
+  1. Находит все WebSocket connections для user
+  2. Отправляет JSON сообщение:
+     {
+       "type": "transcription_completed",
+       "message": "Транскрипция готова!",
+       "data": {"entry_id": 123},
+       "timestamp": 1738262400
+     }
+  3. Если connection закрыто - удаляет из map
+
+→ BroadcastToUser(userID, notification)
+  ЧТО ДЕЛАЕТ:
+  1. Публикует в Redis: PUBLISH notifications:{user_id} {json}
+  2. Все инстансы сервиса получают и отправляют своим clients
+  3. Работает в multi-instance окружении
+
+→ HandleDisconnect(userID, connectionID)
+  ЧТО ДЕЛАЕТ:
+  1. Удаляет connection из map
+  2. Если connections = 0, отписывается от Redis channel
+
+gRPC МЕТОДЫ (internal/protobuf/notification.proto):
+- SendNotification(SendNotificationRequest) → Response
+- BroadcastToUser(...) → ...
+
+RABBITMQ CONSUMERS:
+→ StartEventConsumer()
+  - Слушает очереди: 
+    * "notification_transcription_done"
+    * "notification_nlp_done"
+  - Отправляет уведомления пользователям
+
+ТИПЫ УВЕДОМЛЕНИЙ:
+1. "transcription_started" - Началась транскрипция
+2. "transcription_completed" - Транскрипция готова
+3. "nlp_completed" - AI анализ завершен
+4. "entry_deleted" - Запись удалена
+5. "error" - Произошла ошибка
+
+КАК РАБОТАЕТ WebSocket:
+1. Frontend подключается: ws://localhost/ws?token={jwt}
+2. Сервер валидирует токен
+3. Upgrade HTTP → WebSocket
+4. Держит постоянное соединение
+5. Отправляет сообщения при событиях
+6. Frontend обновляет UI в реальном времени
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 6. API-GATEWAY (Единая точка входа)                            │
+└─────────────────────────────────────────────────────────────────┘
+
+НАЗНАЧЕНИЕ:
+Единый HTTP API для всех сервисов, маршрутизация, авторизация
+
+ПОРТ:
+- 8080 - HTTP REST API
+
+ЗАВИСИМОСТИ:
+- Auth Service - для валидации токенов
+- Diary Service - для работы с записями
+- Storage Service - для работы с файлами
+- Search Service - для поиска
+
+ФУНКЦИИ:
+
+→ Middleware: AuthMiddleware
+  ЧТО ДЕЛАЕТ:
+  1. Извлекает токен из заголовка Authorization: Bearer {token}
+  2. Вызывает Auth Service → ValidateToken(token)
+  3. Если валиден - добавляет user_id в context
+  4. Если нет - возвращает 401 Unauthorized
+
+→ Middleware: CORSMiddleware
+  ЧТО ДЕЛАЕТ:
+  1. Добавляет заголовки CORS:
+     - Access-Control-Allow-Origin: *
+     - Access-Control-Allow-Methods: GET,POST,PUT,DELETE
+     - Access-Control-Allow-Headers: Authorization,Content-Type
+  2. Обрабатывает OPTIONS preflight requests
+
+→ Middleware: LoggingMiddleware
+  ЧТО ДЕЛАЕТ:
+  1. Логирует каждый HTTP request:
+     - Method, Path, Status, Duration
+  2. Structured JSON logging через Zap
+
+МАРШРУТЫ:
+
+PUBLIC (без авторизации):
+  POST /api/auth/register
+    → Auth Service: Register()
+    
+  POST /api/auth/login
+    → Auth Service: Login()
+
+PROTECTED (требуют JWT токен):
+  POST /api/auth/logout
+    → Auth Service: Logout(user_id)
+
+  POST /api/entries
+    → Diary Service: CreateEntry(user_id, title)
+    
+  POST /api/entries/upload
+    1. Multipart form data с audio file
+    2. Diary Service: CreateEntry()
+    3. Storage Service: UploadFile(audio)
+    4. Diary Service: UploadAudio(entry_id, file_id)
+    
+  GET /api/entries
+    → Diary Service: ListEntries(user_id, limit, offset)
+    
+  GET /api/entries/{id}
+    → Diary Service: GetEntry(entry_id, user_id)
+    
+  PUT /api/entries/{id}
+    → Diary Service: UpdateEntry(entry_id, user_id, data)
+    
+  DELETE /api/entries/{id}
+    → Diary Service: DeleteEntry(entry_id, user_id)
+
+  GET /api/search?q={query}
+    1. Search Service: Search(user_id, query)
+    2. Получает entry_ids
+    3. Diary Service: GetEntry() для каждого
+    4. Возвращает полные записи
+
+  POST /api/storage/upload
+    → Storage Service: GenerateUploadURL()
+    
+  GET /api/storage/{id}/download-url
+    → Storage Service: GenerateDownloadURL(file_id)
+
+КАК РАБОТАЕТ ЗАПРОС:
+1. Frontend → GET /api/entries
+2. API Gateway: AuthMiddleware проверяет токен
+3. API Gateway: Извлекает user_id из токена
+4. API Gateway → Diary Service: gRPC ListEntries(user_id)
+5. Diary Service → PostgreSQL: SELECT * FROM entries
+6. Diary Service → API Gateway: gRPC response
+7. API Gateway → Frontend: HTTP JSON response
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║                     PYTHON AI СЕРВИСЫ                            ║
+╚══════════════════════════════════════════════════════════════════╝
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. TRANSCRIPTION-SERVICE (Транскрипция аудио)                  │
+└─────────────────────────────────────────────────────────────────┘
+
+НАЗНАЧЕНИЕ:
+Преобразование голоса в текст через OpenAI Whisper
+
+ТЕХНОЛОГИИ:
+- FastAPI (веб-фреймворк)
+- OpenAI Whisper (модель распознавания речи)
+- Pika (RabbitMQ клиент)
+- MinIO (для загрузки аудио)
+
+ПОРТ:
+- 8000 - HTTP API
+
+МОДЕЛЬ:
+- Whisper "small" (461 MB)
+- Поддержка русского языка
+- Точность: ~80-85%
+
+ФУНКЦИИ:
+
+→ load_model(model_name)
+  ЧТО ДЕЛАЕТ:
+  1. Загружает модель Whisper при старте
+  2. model_name = "small" (из ENV)
+  3. Модель кешируется в память
+  4. Время загрузки: 10-15 секунд
+
+→ process_transcription_task(message)
+  ЧТО ДЕЛАЕТ:
+  1. Получает сообщение из RabbitMQ "transcription_queue"
+     Message: {entry_id, user_id, audio_file_id}
+  2. Скачивает аудио из MinIO: minio.fget_object()
+  3. Сохраняет во временный файл
+  4. Вызывает whisper.transcribe() с параметрами:
+     - language="russian"
+     - temperature=0.2 (баланс точности)
+     - beam_size=5 (улучшенный поиск)
+     - best_of=5 (больше кандидатов)
+     - condition_on_previous_text=False
+     - initial_prompt="Личный голосовой дневник..."
+  5. Получает результат:
+     {
+       "text": "полный текст транскрипции",
+       "segments": [
+         {"start": 0.0, "end": 3.5, "text": "Привет"},
+         {"start": 3.5, "end": 6.2, "text": "это мой дневник"}
+       ],
+       "language": "ru"
+     }
+  6. Конвертирует segments: секунды → миллисекунды
+  7. Публикует в очередь "transcription_completed"
+  8. Удаляет временный файл
+
+→ health_check()
+  GET /health
+  Возвращает:
+  {
+    "status": "healthy",
+    "model": "small",
+    "minio": "connected",
+    "rabbitmq": "connected"
+  }
+
+→ transcribe_audio() [HTTP endpoint]
+  POST /transcribe?entry_id={id}&user_id={id}&audio_file_id={id}
+  Для ручного тестирования - добавляет задачу в очередь
+
+КАК РАБОТАЕТ WHISPER:
+1. Модель обучена на 680,000 часов многоязычного аудио
+2. Transformer архитектура (encoder-decoder)
+3. Входные данные: raw audio waveform
+4. Выходные данные: текст + тайм-коды
+5. Поддержка 99 языков, включая русский
+6. Модели: tiny (39MB) < base (74MB) < small (244MB) < medium (769MB)
+
+ОПТИМИЗАЦИЯ ДЛЯ РУССКОГО:
+- temperature=0.2: меньше "галлюцинаций"
+- beam_size=5: больше вариантов при декодировании
+- initial_prompt: контекст для модели (разговорная речь, сленг)
+- condition_on_previous_text=False: не форсировать литературный стиль
+
+ВРЕМЯ ОБРАБОТКИ:
+- Модель small на CPU
+- ~15-30 секунд на 30 сек аудио
+- ~2x realtime (аудио 2 минуты = обработка 4 минуты)
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. NLP-SERVICE (Анализ эмоций и ключевых слов)                 │
+└─────────────────────────────────────────────────────────────────┘
+
+НАЗНАЧЕНИЕ:
+Анализ транскрибированного текста для извлечения эмоций и ключевых слов
+
+ТЕХНОЛОГИИ:
+- FastAPI
+- Hugging Face Transformers
+- Pre-trained модели для sentiment и emotion
+
+ПОРТ:
+- 8001 - HTTP API
+
+МОДЕЛИ:
+1. Sentiment Analysis:
+   - distilbert-base-uncased-finetuned-sst-2-english
+   - Определяет: positive / negative
+   
+2. Emotion Classification:
+   - j-hartmann/emotion-english-distilroberta-base
+   - Определяет: joy, sadness, anger, fear, surprise, disgust, neutral
+
+ФУНКЦИИ:
+
+→ load_models()
+  ЧТО ДЕЛАЕТ:
+  1. Загружает обе модели при старте
+  2. Модели кешируются в память
+  3. device=-1 (использует CPU, не GPU)
+  4. Время загрузки: 20-30 секунд
+
+→ process_nlp_task(message)
+  ЧТО ДЕЛАЕТ:
+  1. Получает из очереди "nlp_queue"
+     Message: {entry_id, transcription}
+  2. Обрезает текст до 512 токенов (лимит модели)
+  3. Анализирует sentiment:
+     result = sentiment_analyzer(text)
+     → {"label": "POSITIVE", "score": 0.95}
+  4. Классифицирует эмоции:
+     result = emotion_classifier(text)
+     → [
+       {"label": "joy", "score": 0.85},
+       {"label": "surprise", "score": 0.42},
+       {"label": "neutral", "score": 0.15}
+     ]
+  5. Берет топ-3 эмоции с score > 0.1
+  6. Извлекает keywords через extract_keywords()
+  7. Генерирует summary через generate_summary()
+  8. Публикует в "nlp_completed":
+     {
+       "entry_id": 123,
+       "sentiment": "positive",
+       "emotions": ["joy", "surprise"],
+       "keywords": ["друзья", "встреча", "кафе"],
+       "summary": "Встретился с друзьями в кафе..."
+     }
+
+→ extract_keywords(text, max_keywords=10)
+  ЧТО ДЕЛАЕТ:
+  1. Токенизирует текст (split по пробелам)
+  2. Удаляет стоп-слова (the, and, is, was, etc.)
+  3. Фильтрует слова короче 4 символов
+  4. Считает частоту каждого слова
+  5. Возвращает топ-10 самых частых
+  
+  ПРИМЕР:
+  Текст: "Сегодня встретил друзей. Друзья пригласили в кафе."
+  Keywords: ["друзей", "встретил", "пригласили", "кафе"]
+
+→ generate_summary(text, max_length=200)
+  ЧТО ДЕЛАЕТ:
+  1. Разбивает текст на предложения (split по '.')
+  2. Берет первые предложения пока length < 200
+  3. Возвращает краткую версию
+  
+  ПРИМЕР:
+  Полный текст: 500 символов
+  Summary: первые 2-3 предложения = 180 символов
+
+→ health_check()
+  GET /health
+  Возвращает статус загрузки моделей
+
+→ analyze_text() [HTTP endpoint]
+  POST /analyze?entry_id={id}&transcription={text}
+  Для ручного тестирования
+
+КАК РАБОТАЮТ МОДЕЛИ:
+1. Transformer-based neural networks
+2. Обучены на больших датасетах (миллионы текстов)
+3. Понимают контекст и семантику
+4. Работают на уровне токенов (sub-words)
+
+SENTIMENT ANALYSIS:
+- Binary classification: positive / negative
+- Confidence score: 0.0 - 1.0
+- Примеры:
+  * "Отличный день!" → positive (0.98)
+  * "Все плохо" → negative (0.92)
+
+EMOTION CLASSIFICATION:
+- Multi-label classification
+- 7 базовых эмоций (Ekman's emotions)
+- Может выдать несколько эмоций одновременно
+- Примеры:
+  * "Я так рад!" → joy (0.95)
+  * "Боюсь не успеть" → fear (0.82), anxiety (0.45)
+
+ВРЕМЯ ОБРАБОТКИ:
+- На CPU
+- ~1-2 секунды на один текст
+- Быстрее транскрипции в 10-20 раз
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║                    ИНФРАСТРУКТУРНЫЕ СЕРВИСЫ                      ║
+╚══════════════════════════════════════════════════════════════════╝
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 1. POSTGRESQL (Реляционная база данных)                        │
+└─────────────────────────────────────────────────────────────────┘
+
+ВЕРСИЯ: PostgreSQL 15 Alpine
+
+ИНСТАНСЫ:
+У нас 3 отдельных базы данных (Database-per-Service pattern):
+
+A) postgres-auth (порт 5432)
+   База: auth_db
+   Таблицы:
+   - users
+     * id SERIAL PRIMARY KEY
+     * email VARCHAR(255) UNIQUE NOT NULL
+     * password_hash VARCHAR(255) NOT NULL
+     * name VARCHAR(255)
+     * created_at TIMESTAMP DEFAULT NOW()
+     * updated_at TIMESTAMP DEFAULT NOW()
+   
+   Индексы:
+   - idx_users_email ON users(email)
+
+B) postgres-diary (порт 5433)
+   База: diary_db
+   Таблицы:
+   - entries
+     * id SERIAL PRIMARY KEY
+     * user_id INT NOT NULL
+     * title VARCHAR(500)
+     * content TEXT
+     * audio_file_id VARCHAR(255)
+     * audio_duration_ms INT
+     * transcription TEXT
+     * transcription_status VARCHAR(50)
+     * segments JSONB
+     * sentiment VARCHAR(50)
+     * emotions JSONB
+     * keywords JSONB
+     * summary TEXT
+     * created_at TIMESTAMP DEFAULT NOW()
+     * updated_at TIMESTAMP DEFAULT NOW()
+   
+   Индексы:
+   - idx_entries_user_id ON entries(user_id)
+   - idx_entries_created_at ON entries(created_at DESC)
+   - idx_entries_sentiment ON entries(sentiment)
+   - gin_entries_emotions ON entries USING GIN(emotions)
+
+C) postgres-search (порт 5434)
+   База: search_db
+   Таблицы:
+   - search_index_meta
+     * entry_id INT PRIMARY KEY
+     * user_id INT NOT NULL
+     * indexed_at TIMESTAMP DEFAULT NOW()
+     * version INT DEFAULT 1
+
+VOLUMES:
+- postgres-auth-data
+- postgres-diary-data
+- postgres-search-data
+
+Данные персистентны, не теряются при перезапуске контейнеров
+
+HEALTHCHECK:
+pg_isready -U postgres
+Проверяет, что БД принимает подключения
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 2. REDIS (In-memory кеш и pub/sub)                             │
+└─────────────────────────────────────────────────────────────────┘
+
+ВЕРСИЯ: Redis 7 Alpine
+
+ПОРТ: 6379
+
+НАЗНАЧЕНИЕ:
+1. Хранение сессий (auth-service)
+2. Pub/Sub для WebSocket уведомлений (notification-service)
+3. Кеш для частых запросов (опционально)
+
+СТРУКТУРЫ ДАННЫХ:
+
+1. Сессии (String с TTL):
+   KEY: session:{user_id}
+   VALUE: JSON {user_id, token, created_at}
+   TTL: 24 часа (86400 секунд)
+   
+   Команды:
+   SET session:123 "{...}" EX 86400
+   GET session:123
+   DEL session:123
+
+2. Pub/Sub каналы:
+   CHANNEL: notifications:{user_id}
+   MESSAGE: JSON {type, message, data, timestamp}
+   
+   Команды:
+   PUBLISH notifications:123 "{...}"
+   SUBSCRIBE notifications:123
+
+3. Кеш (опционально):
+   KEY: cache:entry:{entry_id}
+   VALUE: JSON entry data
+   TTL: 5 минут
+
+ПЕРСИСТЕНТНОСТЬ:
+- Данные НЕ сохраняются на диск по умолчанию
+- При перезапуске Redis данные теряются
+- Сессии нужно пересоздавать (re-login)
+
+HEALTHCHECK:
+redis-cli ping → PONG
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 3. RABBITMQ (Очередь сообщений)                                │
+└─────────────────────────────────────────────────────────────────┘
+
+ВЕРСИЯ: RabbitMQ 3 Management Alpine
+
+ПОРТЫ:
+- 5672 - AMQP протокол
+- 15672 - Management UI (http://localhost:15672)
+
+ЛОГИН: guest / guest
+
+НАЗНАЧЕНИЕ:
+Асинхронная обработка задач между сервисами
+
+ОЧЕРЕДИ (Queues):
+
+1. transcription_queue
+   Producer: Diary Service (при загрузке аудио)
+   Consumer: Transcription Service
+   Message: {entry_id, user_id, audio_file_id}
+   Durability: true (сообщения не теряются)
+   
+2. transcription_completed
+   Producer: Transcription Service
+   Consumer: Diary Service
+   Message: {entry_id, transcription, segments, language}
+   
+3. nlp_queue
+   Producer: Diary Service (после транскрипции)
+   Consumer: NLP Service
+   Message: {entry_id, transcription}
+   
+4. nlp_completed
+   Producer: NLP Service
+   Consumer: Diary Service
+   Message: {entry_id, sentiment, emotions, keywords, summary}
+   
+5. search_index_queue
+   Producer: Diary Service
+   Consumer: Search Service
+   Message: {entry_id, user_id, title, transcription}
+   
+6. notification_* (различные очереди)
+   Producer: любой сервис
+   Consumer: Notification Service
+   Message: {user_id, type, message, data}
+
+СВОЙСТВА:
+- Durable queues: сохраняются при перезапуске
+- Persistent messages: не теряются при падении
+- Acknowledgments: подтверждение обработки
+- Dead Letter Queue: для failed messages (опционально)
+
+КАК РАБОТАЕТ:
+1. Producer публикует сообщение в очередь
+2. RabbitMQ хранит сообщение
+3. Consumer получает и обрабатывает
+4. Consumer отправляет ACK (подтверждение)
+5. RabbitMQ удаляет сообщение из очереди
+
+ПРЕИМУЩЕСТВА:
+- Асинхронность: diary-service не ждет транскрипции
+- Надежность: сообщения не теряются
+- Масштабируемость: можно добавить workers
+- Decoupling: сервисы независимы
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 4. MINIO (S3-совместимое хранилище объектов)                   │
+└─────────────────────────────────────────────────────────────────┘
+
+ВЕРСИЯ: minio/minio:latest
+
+ПОРТЫ:
+- 9000 - API (S3-compatible)
+- 9001 - Web Console (http://localhost:9001)
+
+ЛОГИН: minioadmin / minioadmin
+
+НАЗНАЧЕНИЕ:
+Хранение больших бинарных файлов (аудио)
+
+BUCKET:
+voice-diary-audio
+
+СТРУКТУРА:
+{user_id}/{audio_file_id}.webm
+
+Пример:
+- 123/f3e5d8a1-234b-45c6-7890-abcdef123456.webm
+- 123/a1b2c3d4-5678-90ef-1234-567890abcdef.webm
+- 456/...
+
+ОПЕРАЦИИ:
+
+1. PutObject(bucket, key, file)
+   - Загрузка файла
+   - Возвращает ETag
+   
+2. GetObject(bucket, key)
+   - Скачивание файла
+   - Возвращает stream
+   
+3. PresignedPutURL(bucket, key, expiry)
+   - Временный URL для загрузки
+   - Клиент может загружать напрямую
+   - Срок: 15 минут
+   
+4. PresignedGetURL(bucket, key, expiry)
+   - Временный URL для скачивания
+   - Клиент может скачивать напрямую
+   - Срок: 1 час
+   
+5. RemoveObject(bucket, key)
+   - Удаление файла
+
+ПРЕИМУЩЕСТВА:
+- S3-compatible API (стандартный)
+- Неограниченное хранилище (в рамках диска)
+- Поддержка больших файлов (multi-part upload)
+- Presigned URLs для безопасного доступа
+
+VOLUME:
+minio-data:/data
+Данные сохраняются между перезапусками
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 5. ELASTICSEARCH (Полнотекстовый поиск)                        │
+└─────────────────────────────────────────────────────────────────┘
+
+ВЕРСИЯ: Elasticsearch 8.11.0
+
+ПОРТ: 9200
+
+НАЗНАЧЕНИЕ:
+Индексация и полнотекстовый поиск по транскрипциям
+
+INDEX:
+voice-diary-entries
+
+MAPPING (схема):
+{
+  "mappings": {
+    "properties": {
+      "entry_id": {"type": "keyword"},
+      "user_id": {"type": "keyword"},
+      "title": {
+        "type": "text",
+        "analyzer": "standard"
+      },
+      "transcription": {
+        "type": "text",
+        "analyzer": "russian"
+      },
+      "keywords": {"type": "keyword"},
+      "emotions": {"type": "keyword"},
+      "sentiment": {"type": "keyword"},
+      "created_at": {"type": "date"}
+    }
+  }
+}
+
+АНАЛИЗАТОРЫ:
+
+1. Standard Analyzer (для title):
+   - Токенизация по пробелам
+   - Lowercase фильтр
+   - Стемминг (необязательно)
+
+2. Russian Analyzer (для transcription):
+   - Токенизация с учетом русского языка
+   - Удаление стоп-слов (и, в, на, с, по, для...)
+   - Стемминг (друзья → друг, говорил → говор)
+
+ЗАПРОСЫ:
+
+1. Multi-match query:
+   {
+     "query": {
+       "multi_match": {
+         "query": "встреча с друзьями",
+         "fields": ["title^2", "transcription"],
+         "type": "best_fields"
+       }
+     }
+   }
+   
+   - Ищет в title и transcription
+   - title^2 = бустинг (в 2 раза важнее)
+   - Возвращает топ-10 по релевантности
+
+2. Фильтрация:
+   {
+     "query": {
+       "bool": {
+         "must": [
+           {"match": {"transcription": "работа"}},
+           {"term": {"user_id": "123"}},
+           {"term": {"sentiment": "positive"}}
+         ]
+       }
+     }
+   }
+
+3. Aggregations (аналитика):
+   - Количество записей по эмоциям
+   - Топ keywords
+   - Распределение по sentiment
+
+РАНЖИРОВАНИЕ:
+- TF-IDF: частота слова * обратная частота документа
+- BM25: улучшенная версия TF-IDF
+- Boost: увеличение веса полей
+
+ВРЕМЯ ПОИСКА:
+- Миллисекунды даже на миллионах документов
+- Инвертированный индекс (inverted index)
+
+VOLUME:
+elasticsearch-data:/usr/share/elasticsearch/data
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ 6. NGINX (Reverse Proxy)                                       │
+└─────────────────────────────────────────────────────────────────┘
+
+ВЕРСИЯ: nginx:alpine
+
+ПОРТ: 80 (HTTP)
+
+НАЗНАЧЕНИЕ:
+Единая точка входа, маршрутизация, load balancing
+
+КОНФИГУРАЦИЯ (nginx.conf):
+
+upstream api {
+    server api-gateway:8080;
+}
+
+upstream frontend {
+    server frontend:3000;
+}
+
+upstream ws {
+    server notification-service:8086;
+}
+
+server {
+    listen 80;
+    
+    # Frontend
+    location / {
+        proxy_pass http://frontend;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+    }
+    
+    # API
+    location /api/ {
+        proxy_pass http://api/;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+    }
+    
+    # WebSocket
+    location /ws {
+        proxy_pass http://ws;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+    }
+}
+
+ФУНКЦИИ:
+
+→ Reverse Proxy
+  - Клиент обращается к nginx
+  - Nginx перенаправляет на нужный сервис
+  - Сервисы скрыты от внешнего мира
+
+→ Load Balancing
+  - Можно запустить несколько инстансов сервиса
+  - Nginx распределит нагрузку между ними
+  - Алгоритмы: round-robin, least_conn, ip_hash
+
+→ SSL Termination (в production)
+  - Nginx принимает HTTPS
+  - Внутри общается по HTTP
+  - Сертификат Let's Encrypt
+
+→ Static Files (опционально)
+  - Может отдавать статику напрямую
+  - Не нагружая Node.js
+
+→ Caching (опционально)
+  - Кеширование API responses
+  - Уменьшает нагрузку на backend
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║                       ПРОТОКОЛ ВЗАИМОДЕЙСТВИЯ                    ║
+╚══════════════════════════════════════════════════════════════════╝
+
+
+┌─────────────────────────────────────────────────────────────────┐
+│ gRPC (Google Remote Procedure Call)                            │
+└─────────────────────────────────────────────────────────────────┘
+
+НАЗНАЧЕНИЕ:
+Коммуникация между Go микросервисами
+
+ОСОБЕННОСТИ:
+- Binary protocol (быстрее JSON)
+- HTTP/2 (мультиплексирование)
+- Strongly typed (Protocol Buffers)
+- Bidirectional streaming
+
+PROTOCOL BUFFERS (.proto файлы):
+
+service AuthService {
+    rpc Register(RegisterRequest) returns (RegisterResponse);
+    rpc Login(LoginRequest) returns (LoginResponse);
+    rpc ValidateToken(ValidateTokenRequest) returns (ValidateTokenResponse);
+}
+
+message RegisterRequest {
+    string email = 1;
+    string password = 2;
+    string name = 3;
+}
+
+message RegisterResponse {
+    int64 user_id = 1;
+    string message = 2;
+}
+
+ГЕНЕРАЦИЯ КОДА:
+protoc --go_out=. --go-grpc_out=. auth.proto
+
+Генерирует:
+- auth.pb.go (структуры)
+- auth_grpc.pb.go (клиент и сервер)
+
+ИСПОЛЬЗОВАНИЕ:
+
+CLIENT:
+conn, _ := grpc.Dial("auth-service:50051")
+client := authpb.NewAuthServiceClient(conn)
+response, _ := client.Register(ctx, &authpb.RegisterRequest{
+    Email: "user@example.com",
+    Password: "password123",
+    Name: "John Doe"
+})
+
+SERVER:
+type AuthHandler struct {
+    authpb.UnimplementedAuthServiceServer
+    service *service.AuthService
+}
+
+func (h *AuthHandler) Register(ctx, req) (*authpb.RegisterResponse, error) {
+    userID, err := h.service.Register(req.Email, req.Password, req.Name)
+    return &authpb.RegisterResponse{UserId: userID}, err
+}
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║                     ПОЛНЫЙ ПОТОК РАБОТЫ ПРИЛОЖЕНИЯ               ║
+╚══════════════════════════════════════════════════════════════════╝
+
+
+СЦЕНАРИЙ 1: РЕГИСТРАЦИЯ НОВОГО ПОЛЬЗОВАТЕЛЯ
+─────────────────────────────────────────────
+
+1. Пользователь открывает http://localhost
+2. Frontend показывает кнопку "Регистрация"
+3. Пользователь кликает, переходит на /auth/register
+4. Заполняет форму: email, name, password
+5. Frontend → POST /api/auth/register
+6. Nginx → API Gateway:8080
+7. API Gateway → Auth Service:50051 (gRPC Register)
+8. Auth Service:
+   - Проверяет уникальность email
+   - Хеширует пароль (bcrypt)
+   - INSERT INTO users VALUES (...)
+   - Возвращает user_id
+9. Auth Service → API Gateway → Frontend
+10. Frontend автоматически логинит
+11. Frontend сохраняет token в localStorage
+12. Редирект на главную страницу
+
+
+СЦЕНАРИЙ 2: СОЗДАНИЕ ГОЛОСОВОЙ ЗАПИСИ
+──────────────────────────────────────
+
+1. Пользователь на главной странице
+2. Кликает "Новая запись"
+3. Frontend показывает AudioRecorder компонент
+4. Компонент запрашивает доступ к микрофону
+5. Пользователь разрешает
+6. Начинается запись через MediaRecorder
+7. Визуализация звуковой волны
+8. Таймер отсчитывает время
+9. Пользователь кликает "Остановить"
+10. MediaRecorder.stop() → создается Blob
+11. Frontend → POST /api/entries/upload (FormData с audio)
+12. API Gateway:
+    - AuthMiddleware проверяет JWT
+    - Извлекает user_id
+    - Вызывает Diary Service: CreateEntry()
+13. Diary Service:
+    - INSERT INTO entries (user_id, title, status="pending")
+    - Возвращает entry_id
+14. API Gateway вызывает Storage Service: UploadFile()
+15. Storage Service:
+    - Генерирует file_id (UUID)
+    - Сохраняет в MinIO: {user_id}/{file_id}.webm
+    - Возвращает file_id и download_url
+16. API Gateway вызывает Diary Service: UploadAudio(entry_id, file_id)
+17. Diary Service:
+    - UPDATE entries SET audio_file_id=?, duration=?, status="processing"
+    - Публикует в RabbitMQ "transcription_queue":
+      {entry_id, user_id, audio_file_id}
+18. API Gateway → Frontend: {entry_id, message: "Загружено"}
+19. Frontend показывает уведомление и обновляет список
+
+
+СЦЕНАРИЙ 3: АВТОМАТИЧЕСКАЯ ТРАНСКРИПЦИЯ (ФОНОВЫЙ ПРОЦЕСС)
+───────────────────────────────────────────────────────────
+
+1. Transcription Service слушает очередь "transcription_queue"
+2. Получает сообщение: {entry_id: 123, user_id: 456, audio_file_id: "abc"}
+3. Скачивает аудио из MinIO:
+   - minio.fget_object("voice-diary-audio", "456/abc.webm", "/tmp/audio.webm")
+4. Загружает Whisper model (если еще не загружена)
+5. Вызывает whisper.transcribe("/tmp/audio.webm", language="russian")
+6. Whisper обрабатывает аудио (15-30 секунд):
+   - Конвертирует в mel-spectrogram
+   - Encoder обрабатывает спектрограмм
+   - Decoder генерирует текст token-by-token
+7. Получает результат:
+   {
+     "text": "Сегодня был отличный день. Встретился с друзьями...",
+     "segments": [
+       {"start": 0.0, "end": 2.5, "text": "Сегодня был отличный день."},
+       {"start": 2.5, "end": 5.3, "text": "Встретился с друзьями"}
+     ]
+   }
+8. Публикует в "transcription_completed":
+   {entry_id: 123, transcription: "...", segments: [...]}
+9. Удаляет временный файл
+10. Diary Service слушает "transcription_completed"
+11. Получает сообщение
+12. UPDATE entries SET transcription=?, segments=?, status="completed"
+13. Публикует в "nlp_queue": {entry_id: 123, transcription: "..."}
+14. Публикует в "search_index_queue": {entry_id: 123, user_id: 456, ...}
+15. Публикует в "notification_queue":
+    {user_id: 456, type: "transcription_completed", entry_id: 123}
+
+
+СЦЕНАРИЙ 4: NLP АНАЛИЗ (ФОНОВЫЙ ПРОЦЕСС)
+─────────────────────────────────────────
+
+1. NLP Service слушает "nlp_queue"
+2. Получает: {entry_id: 123, transcription: "Сегодня был отличный день..."}
+3. Загружает models (если еще не загружены):
+   - Sentiment: distilbert-base-uncased-finetuned-sst-2-english
+   - Emotion: j-hartmann/emotion-english-distilroberta-base
+4. Анализирует sentiment:
+   result = sentiment_analyzer("Сегодня был отличный день...")
+   → {"label": "POSITIVE", "score": 0.95}
+5. Классифицирует emotions:
+   result = emotion_classifier("...")
+   → [
+     {"label": "joy", "score": 0.85},
+     {"label": "surprise", "score": 0.42},
+     {"label": "neutral", "score": 0.15}
+   ]
+   Берет топ-3: ["joy", "surprise"]
+6. Извлекает keywords:
+   - Токенизация: ["сегодня", "был", "отличный", "день", "встретился", "друзьями"]
+   - Удаление стоп-слов: ["отличный", "день", "встретился", "друзьями"]
+   - Подсчет частоты
+   - Топ-10: ["день", "друзья", "встреча", "кафе", ...]
+7. Генерирует summary:
+   - Берет первые 2-3 предложения (до 200 символов)
+8. Публикует в "nlp_completed":
+   {
+     entry_id: 123,
+     sentiment: "positive",
+     emotions: ["joy", "surprise"],
+     keywords: ["день", "друзья", "встреча"],
+     summary: "Сегодня был отличный день. Встретился с друзьями."
+   }
+9. Diary Service получает сообщение
+10. UPDATE entries SET sentiment=?, emotions=?, keywords=?, summary=?
+11. Публикует уведомление пользователю
+
+
+СЦЕНАРИЙ 5: ИНДЕКСАЦИЯ ДЛЯ ПОИСКА (ФОНОВЫЙ ПРОЦЕСС)
+────────────────────────────────────────────────────
+
+1. Search Service слушает "search_index_queue"
+2. Получает: {entry_id: 123, user_id: 456, title: "...", transcription: "..."}
+3. Создает документ в Elasticsearch:
+   PUT /voice-diary-entries/_doc/123
+   {
+     "entry_id": 123,
+     "user_id": 456,
+     "title": "...",
+     "transcription": "...",
+     "created_at": "2026-01-30T14:35:00Z"
+   }
+4. Elasticsearch анализирует текст:
+   - Токенизация (russian analyzer)
+   - Стемминг: друзьями → друг
+   - Создание inverted index:
+     "друг" → [entry_123]
+     "встреч" → [entry_123]
+5. Сохраняет метаданные в PostgreSQL:
+   INSERT INTO search_index_meta VALUES (123, 456, NOW(), 1)
+
+
+СЦЕНАРИЙ 6: REAL-TIME УВЕДОМЛЕНИЯ
+──────────────────────────────────
+
+1. Frontend подключается к WebSocket при загрузке:
+   ws://localhost/ws?token={jwt}
+2. Nginx перенаправляет на Notification Service:8086
+3. Notification Service:
+   - Валидирует JWT token
+   - Upgrade HTTP → WebSocket
+   - Сохраняет connection: user_456 → [ws_conn_1]
+   - Подписывается на Redis: SUBSCRIBE notifications:456
+4. Когда происходит событие (например, транскрипция готова):
+   - Diary Service публикует: PUBLISH notifications:456 {...}
+5. Notification Service получает из Redis
+6. Отправляет через WebSocket:
+   {
+     "type": "transcription_completed",
+     "message": "Транскрипция готова!",
+     "data": {"entry_id": 123},
+     "timestamp": 1738262400
+   }
+7. Frontend получает WebSocket message
+8. Обновляет UI:
+   - Показывает toast notification
+   - Обновляет запись в списке
+   - Показывает транскрипцию
+
+
+СЦЕНАРИЙ 7: ПРОСМОТР ЗАПИСЕЙ
+─────────────────────────────
+
+1. Frontend рендерит EntryList компонент
+2. useEffect → fetchEntries()
+3. GET /api/entries?limit=20&offset=0
+4. API Gateway → Diary Service: ListEntries(user_id, 20, 0)
+5. Diary Service:
+   SELECT * FROM entries 
+   WHERE user_id = 456 
+   ORDER BY created_at DESC 
+   LIMIT 20
+6. Для каждой записи:
+   - Если есть audio_file_id, генерирует download_url
+7. Возвращает массив записей
+8. Frontend отображает карточки:
+   - Дата: "30 января 2026, 14:35"
+   - Длительность: "02:05"
+   - Транскрипция: "Сегодня был отличный день..."
+   - Эмоции: 😊 joy, 😮 surprise
+   - Кнопки: ▶️ Воспроизвести, 🗑️ Удалить
+
+
+СЦЕНАРИЙ 8: ВОСПРОИЗВЕДЕНИЕ АУДИО
+──────────────────────────────────
+
+1. Пользователь кликает ▶️ на записи
+2. Frontend → GET /api/storage/{file_id}/download-url
+3. API Gateway → Storage Service: GenerateDownloadURL(file_id)
+4. Storage Service:
+   - Создает presigned URL в MinIO
+   - Срок действия: 1 час
+   - URL: http://minio:9000/voice-diary-audio/456/abc.webm?token=...
+5. Frontend получает URL
+6. Создает Audio объект:
+   const audio = new Audio(download_url)
+   audio.play()
+7. Показывает прогресс-бар:
+   audio.ontimeupdate = () => {
+     progress = (audio.currentTime / audio.duration) * 100
+   }
+8. Если есть segments, подсвечивает текст синхронно:
+   - Проверяет currentTime
+   - Находит соответствующий segment
+   - Добавляет класс "active" к тексту
+
+
+СЦЕНАРИЙ 9: ПОИСК ПО ЗАПИСЯМ
+─────────────────────────────
+
+1. Пользователь вводит в поиск: "встреча с друзьями"
+2. Frontend → GET /api/search?q=встреча с друзьями
+3. API Gateway → Search Service: Search(user_id, query, {}, 10, 0)
+4. Search Service → Elasticsearch:
+   POST /voice-diary-entries/_search
+   {
+     "query": {
+       "bool": {
+         "must": [
+           {"match": {"transcription": "встреча с друзьями"}},
+           {"term": {"user_id": 456}}
+         ]
+       }
+     },
+     "size": 10,
+     "sort": [{"_score": "desc"}]
+   }
+5. Elasticsearch:
+   - Анализирует запрос: "встреч" + "друг"
+   - Ищет в inverted index
+   - Ранжирует по релевантности (BM25)
+   - Возвращает топ-10 entry_ids с scores
+6. Search Service возвращает [123, 456, 789, ...]
+7. API Gateway запрашивает полные записи:
+   - Diary Service: GetEntry(123)
+   - Diary Service: GetEntry(456)
+   - ...
+8. Возвращает массив полных записей
+9. Frontend отображает результаты с подсветкой найденных слов
+
+
+СЦЕНАРИЙ 10: УДАЛЕНИЕ ЗАПИСИ
+─────────────────────────────
+
+1. Пользователь кликает 🗑️ на записи
+2. Frontend показывает confirm: "Удалить запись?"
+3. Пользователь подтверждает
+4. DELETE /api/entries/123
+5. API Gateway → Diary Service: DeleteEntry(123, user_id)
+6. Diary Service:
+   - Проверяет: SELECT * FROM entries WHERE id=123 AND user_id=456
+   - Если не владелец → 403 Forbidden
+   - Получает audio_file_id
+   - Вызывает Storage Service: DeleteFile(audio_file_id)
+7. Storage Service:
+   - Удаляет из MinIO: RemoveObject("voice-diary-audio", "456/abc.webm")
+8. Diary Service:
+   - Вызывает Search Service: DeleteFromIndex(123)
+9. Search Service:
+   - DELETE /voice-diary-entries/_doc/123
+   - DELETE FROM search_index_meta WHERE entry_id=123
+10. Diary Service:
+    - DELETE FROM entries WHERE id=123
+11. Возвращает успех
+12. Frontend удаляет карточку из списка с анимацией
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║                           БЕЗОПАСНОСТЬ                           ║
+╚══════════════════════════════════════════════════════════════════╝
+
+1. АУТЕНТИФИКАЦИЯ:
+   - JWT токены (access + refresh)
+   - bcrypt для паролей (cost=10)
+   - Сессии в Redis с TTL
+
+2. АВТОРИЗАЦИЯ:
+   - Middleware проверяет токен на каждом запросе
+   - Проверка владельца перед операциями (user_id)
+   - gRPC методы требуют user_id в запросе
+
+3. ВАЛИДАЦИЯ:
+   - Email формат
+   - Пароль минимум 8 символов
+   - Санитизация входных данных
+   - Лимиты размера файлов (10 минут аудио)
+
+4. СЕТЕВАЯ БЕЗОПАСНОСТЬ:
+   - Внутренняя сеть Docker (voice-diary-network)
+   - Только Nginx и frontend доступны извне
+   - gRPC сервисы закрыты
+
+5. CORS:
+   - Настроен в API Gateway
+   - Allow-Origin: frontend домен
+   - Credentials: true
+
+6. RATE LIMITING (TODO):
+   - Ограничение количества запросов
+   - Защита от DDoS
+
+7. SQL INJECTION:
+   - Prepared statements (PostgreSQL)
+   - Никогда не конкатенируем SQL
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║                        МОНИТОРИНГ И ЛОГИ                         ║
+╚══════════════════════════════════════════════════════════════════╝
+
+ЛОГИРОВАНИЕ:
+- Structured JSON logs (Zap)
+- Уровни: DEBUG, INFO, WARN, ERROR, FATAL
+- Поля: timestamp, level, service, message, context
+
+HEALTH CHECKS:
+- Каждый сервис: GET /health
+- Проверка БД, Redis, RabbitMQ соединений
+- Docker healthcheck каждые 10-30 секунд
+
+МЕТРИКИ (TODO):
+- Prometheus для сбора
+- Grafana для визуализации
+- Метрики: requests, latency, errors, queue size
+
+КОМАНДЫ ДЛЯ ОТЛАДКИ:
+docker-compose logs -f [service]
+docker-compose ps
+docker stats
+docker exec -it [container] sh
+
+
+╔══════════════════════════════════════════════════════════════════╗
+║                            ИТОГО                                 ║
+╚══════════════════════════════════════════════════════════════════╝
+
+КОМПОНЕНТЫ: 17 Docker контейнеров
+ЯЗЫКИ: Go, Python, TypeScript
+БАЗЫ ДАННЫХ: 3x PostgreSQL, Redis, Elasticsearch
+ОЧЕРЕДИ: RabbitMQ
+ХРАНИЛИЩЕ: MinIO (S3-compatible)
+AI: Whisper (speech-to-text), Hugging Face (NLP)
+ПРОТОКОЛЫ: gRPC, HTTP REST, WebSocket
+АРХИТЕКТУРА: Микросервисная, Event-Driven
+
+ВОЗМОЖНОСТИ:
+✅ Регистрация и вход
+✅ Запись аудио в браузере (до 10 минут)
+✅ Автоматическая транскрипция (Whisper small)
+✅ AI анализ эмоций (7 категорий)
+✅ Извлечение ключевых слов
+✅ Полнотекстовый поиск (Elasticsearch)
+✅ Воспроизведение с синхронизацией текста
+✅ Real-time уведомления (WebSocket)
+✅ Фильтрация по эмоциям
+✅ Удаление записей
+
+ПРОИЗВОДИТЕЛЬНОСТЬ:
+- Транскрипция: ~2x realtime (2 мин аудио = 4 мин обработки)
+- NLP анализ: ~1-2 секунды
+- Поиск: миллисекунды
+- Индексация: ~1 секунда
+
+═══════════════════════════════════════════════════════════════════
+Конец документации
+═══════════════════════════════════════════════════════════════════

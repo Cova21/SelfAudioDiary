@@ -1,0 +1,82 @@
+syntax = "proto3";
+
+package search;
+
+option go_package = "github.com/voice-diary/backend/internal/gen/search";
+
+// Search Service
+service SearchService {
+  rpc IndexEntry(IndexEntryRequest) returns (IndexEntryResponse);
+  rpc Search(SearchRequest) returns (SearchResponse);
+  rpc DeleteEntry(DeleteEntryRequest) returns (DeleteEntryResponse);
+  rpc UpdateEntry(UpdateEntryRequest) returns (UpdateEntryResponse);
+}
+
+// Index Entry
+message IndexEntryRequest {
+  string entry_id = 1;
+  string user_id = 2;
+  string title = 3;
+  string transcription = 4;
+  string sentiment = 5;
+  repeated string emotions = 6;
+  repeated string keywords = 7;
+  repeated string tags = 8;
+  int64 created_at = 9;
+}
+
+message IndexEntryResponse {
+  bool success = 1;
+}
+
+// Search
+message SearchRequest {
+  string user_id = 1;
+  string query = 2;
+  repeated string emotions = 3;
+  repeated string tags = 4;
+  string sentiment = 5;
+  int64 date_from = 6;
+  int64 date_to = 7;
+  int32 page = 8;
+  int32 page_size = 9;
+}
+
+message SearchResponse {
+  repeated SearchResult results = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message SearchResult {
+  string entry_id = 1;
+  string title = 2;
+  string transcription_snippet = 3;
+  repeated string highlights = 4;
+  float score = 5;
+  int64 created_at = 6;
+}
+
+// Delete Entry
+message DeleteEntryRequest {
+  string entry_id = 1;
+  string user_id = 2;
+}
+
+message DeleteEntryResponse {
+  bool success = 1;
+}
+
+// Update Entry
+message UpdateEntryRequest {
+  string entry_id = 1;
+  string user_id = 2;
+  string title = 3;
+  string transcription = 4;
+  repeated string tags = 5;
+}
+
+message UpdateEntryResponse {
+  bool success = 1;
+}

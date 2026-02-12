@@ -1,0 +1,418 @@
+version: '3.8'
+
+services:
+  # Infrastructure Services
+  postgres-auth:
+    image: postgres:15-alpine
+    container_name: voice-diary-postgres-auth
+    environment:
+      POSTGRES_DB: auth_db
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-auth-data:/var/lib/postgresql/data
+    networks:
+      - voice-diary-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres-diary:
+    image: postgres:15-alpine
+    container_name: voice-diary-postgres-diary
+    environment:
+      POSTGRES_DB: diary_db
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres-diary-data:/var/lib/postgresql/data
+    networks:
+      - voice-diary-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  postgres-search:
+    image: postgres:15-alpine
+    container_name: voice-diary-postgres-search
+    environment:
+      POSTGRES_DB: search_db
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-postgres}
+    ports:
+      - "5434:5432"
+    volumes:
+      - postgres-search-data:/var/lib/postgresql/data
+    networks:
+      - voice-diary-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: voice-diary-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    networks:
+      - voice-diary-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: voice-diary-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: ${RABBITMQ_USER:-guest}
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASS:-guest}
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq-data:/var/lib/rabbitmq
+    networks:
+      - voice-diary-network
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  minio:
+    image: minio/minio:latest
+    container_name: voice-diary-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${MINIO_ROOT_USER:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-minioadmin}
+    ports:
+      - "9000:9000"
+      - "9001:9001"
+    volumes:
+      - minio-data:/data
+    networks:
+      - voice-diary-network
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      interval: 30s
+      timeout: 20s
+      retries: 3
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.11.0
+    container_name: voice-diary-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - "ES_JAVA_OPTS=-Xms512m -Xmx512m"
+    ports:
+      - "9200:9200"
+    volumes:
+      - elasticsearch-data:/usr/share/elasticsearch/data
+    networks:
+      - voice-diary-network
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  # Go Microservices
+  auth-service:
+    build:
+      context: ./backend
+      dockerfile: ./auth-service/Dockerfile
+    container_name: voice-diary-auth-service
+    environment:
+      - SERVICE_NAME=auth-service
+      - GRPC_PORT=50051
+      - HTTP_PORT=8081
+      - POSTGRES_HOST=postgres-auth
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=auth_db
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - JWT_SECRET=${JWT_SECRET:-super-secret-jwt-key-change-in-production}
+    ports:
+      - "50051:50051"
+      - "8081:8081"
+    depends_on:
+      postgres-auth:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - voice-diary-network
+    restart: unless-stopped
+
+  diary-service:
+    build:
+      context: ./backend
+      dockerfile: ./diary-service/Dockerfile
+    container_name: voice-diary-diary-service
+    environment:
+      - SERVICE_NAME=diary-service
+      - GRPC_PORT=50052
+      - HTTP_PORT=8082
+      - POSTGRES_HOST=postgres-diary
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=diary_db
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=${RABBITMQ_USER:-guest}
+      - RABBITMQ_PASS=${RABBITMQ_PASS:-guest}
+      - STORAGE_SERVICE_ADDR=storage-service:50053
+      - SEARCH_SERVICE_ADDR=search-service:50054
+    ports:
+      - "50052:50052"
+      - "8082:8082"
+    depends_on:
+      postgres-diary:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - voice-diary-network
+    restart: unless-stopped
+
+  storage-service:
+    build:
+      context: ./backend
+      dockerfile: ./storage-service/Dockerfile
+    container_name: voice-diary-storage-service
+    environment:
+      - SERVICE_NAME=storage-service
+      - GRPC_PORT=50053
+      - HTTP_PORT=8083
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - MINIO_BUCKET=voice-diary-audio
+      - MINIO_USE_SSL=false
+    ports:
+      - "50053:50053"
+      - "8083:8083"
+    depends_on:
+      minio:
+        condition: service_healthy
+    networks:
+      - voice-diary-network
+    restart: unless-stopped
+
+  search-service:
+    build:
+      context: ./backend
+      dockerfile: ./search-service/Dockerfile
+    container_name: voice-diary-search-service
+    environment:
+      - SERVICE_NAME=search-service
+      - GRPC_PORT=50054
+      - HTTP_PORT=8084
+      - POSTGRES_HOST=postgres-search
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=search_db
+      - POSTGRES_USER=${POSTGRES_USER:-postgres}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-postgres}
+      - ELASTICSEARCH_URL=http://elasticsearch:9200
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=${RABBITMQ_USER:-guest}
+      - RABBITMQ_PASS=${RABBITMQ_PASS:-guest}
+    ports:
+      - "50054:50054"
+      - "8084:8084"
+    depends_on:
+      postgres-search:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - voice-diary-network
+    restart: unless-stopped
+
+  notification-service:
+    build:
+      context: ./backend
+      dockerfile: ./notification-service/Dockerfile
+    container_name: voice-diary-notification-service
+    environment:
+      - SERVICE_NAME=notification-service
+      - GRPC_PORT=50055
+      - HTTP_PORT=8085
+      - WS_PORT=8086
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=${RABBITMQ_USER:-guest}
+      - RABBITMQ_PASS=${RABBITMQ_PASS:-guest}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    ports:
+      - "50055:50055"
+      - "8085:8085"
+      - "8086:8086"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    networks:
+      - voice-diary-network
+    restart: unless-stopped
+
+  api-gateway:
+    build:
+      context: ./backend
+      dockerfile: ./api-gateway/Dockerfile
+    container_name: voice-diary-api-gateway
+    environment:
+      - SERVICE_NAME=api-gateway
+      - HTTP_PORT=8080
+      - AUTH_SERVICE_ADDR=auth-service:50051
+      - DIARY_SERVICE_ADDR=diary-service:50052
+      - STORAGE_SERVICE_ADDR=storage-service:50053
+      - SEARCH_SERVICE_ADDR=search-service:50054
+      - NOTIFICATION_SERVICE_ADDR=notification-service:50055
+      - JWT_SECRET=${JWT_SECRET:-super-secret-jwt-key-change-in-production}
+    ports:
+      - "8080:8080"
+    depends_on:
+      - auth-service
+      - diary-service
+      - storage-service
+      - search-service
+      - notification-service
+    networks:
+      - voice-diary-network
+    restart: unless-stopped
+
+  # Python AI Services
+  transcription-service:
+    build:
+      context: ./ai-services/transcription-service
+      dockerfile: Dockerfile
+    container_name: voice-diary-transcription-service
+    environment:
+      - SERVICE_NAME=transcription-service
+      - PORT=8000
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=${RABBITMQ_USER:-guest}
+      - RABBITMQ_PASS=${RABBITMQ_PASS:-guest}
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin}
+      - MINIO_BUCKET=voice-diary-audio
+      - MINIO_USE_SSL=false
+      - WHISPER_MODEL=small
+      - DIARY_SERVICE_ADDR=diary-service:50052
+    ports:
+      - "8000:8000"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    networks:
+      - voice-diary-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+
+  nlp-service:
+    build:
+      context: ./ai-services/nlp-service
+      dockerfile: Dockerfile
+    container_name: voice-diary-nlp-service
+    environment:
+      - SERVICE_NAME=nlp-service
+      - PORT=8001
+      - RABBITMQ_HOST=rabbitmq
+      - RABBITMQ_PORT=5672
+      - RABBITMQ_USER=${RABBITMQ_USER:-guest}
+      - RABBITMQ_PASS=${RABBITMQ_PASS:-guest}
+      - DIARY_SERVICE_ADDR=diary-service:50052
+    ports:
+      - "8001:8001"
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+    networks:
+      - voice-diary-network
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 4G
+
+  # Frontend
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: voice-diary-frontend
+    environment:
+      - NEXT_PUBLIC_API_URL=http://localhost/api
+      - NEXT_PUBLIC_WS_URL=ws://localhost/ws
+      - NEXTAUTH_URL=http://localhost:3000
+      - NEXTAUTH_SECRET=${NEXTAUTH_SECRET:-super-secret-nextauth-key-change-in-production}
+    ports:
+      - "3000:3000"
+    depends_on:
+      - api-gateway
+    networks:
+      - voice-diary-network
+    restart: unless-stopped
+
+  # Nginx Reverse Proxy
+  nginx:
+    build:
+      context: ./deployments/nginx
+      dockerfile: Dockerfile
+    container_name: voice-diary-nginx
+    ports:
+      - "80:80"
+    depends_on:
+      - api-gateway
+      - frontend
+      - notification-service
+    networks:
+      - voice-diary-network
+    restart: unless-stopped
+
+volumes:
+  postgres-auth-data:
+  postgres-diary-data:
+  postgres-search-data:
+  redis-data:
+  rabbitmq-data:
+  minio-data:
+  elasticsearch-data:
+
+networks:
+  voice-diary-network:
+    driver: bridge

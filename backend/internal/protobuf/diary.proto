@@ -1,0 +1,139 @@
+syntax = "proto3";
+
+package diary;
+
+option go_package = "github.com/voice-diary/backend/internal/gen/diary";
+
+import "google/protobuf/timestamp.proto";
+
+// Diary Service
+service DiaryService {
+  rpc CreateEntry(CreateEntryRequest) returns (CreateEntryResponse);
+  rpc GetEntry(GetEntryRequest) returns (GetEntryResponse);
+  rpc ListEntries(ListEntriesRequest) returns (ListEntriesResponse);
+  rpc UpdateEntry(UpdateEntryRequest) returns (UpdateEntryResponse);
+  rpc DeleteEntry(DeleteEntryRequest) returns (DeleteEntryResponse);
+  rpc UpdateTranscription(UpdateTranscriptionRequest) returns (UpdateTranscriptionResponse);
+  rpc UpdateAnalysis(UpdateAnalysisRequest) returns (UpdateAnalysisResponse);
+}
+
+// Create Entry
+message CreateEntryRequest {
+  string user_id = 1;
+  string title = 2;
+  string audio_file_id = 3;
+  int32 duration_seconds = 4;
+}
+
+message CreateEntryResponse {
+  DiaryEntry entry = 1;
+}
+
+// Get Entry
+message GetEntryRequest {
+  string entry_id = 1;
+  string user_id = 2;
+}
+
+message GetEntryResponse {
+  DiaryEntry entry = 1;
+}
+
+// List Entries
+message ListEntriesRequest {
+  string user_id = 1;
+  int32 page = 2;
+  int32 page_size = 3;
+  string sort_by = 4; // created_at, updated_at
+  string sort_order = 5; // asc, desc
+}
+
+message ListEntriesResponse {
+  repeated DiaryEntry entries = 1;
+  int32 total = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+// Update Entry
+message UpdateEntryRequest {
+  string entry_id = 1;
+  string user_id = 2;
+  string title = 3;
+  repeated string tags = 4;
+}
+
+message UpdateEntryResponse {
+  DiaryEntry entry = 1;
+}
+
+// Delete Entry
+message DeleteEntryRequest {
+  string entry_id = 1;
+  string user_id = 2;
+}
+
+message DeleteEntryResponse {
+  bool success = 1;
+}
+
+// Update Transcription (called by transcription-service)
+message UpdateTranscriptionRequest {
+  string entry_id = 1;
+  string transcription = 2;
+  repeated TranscriptionSegment segments = 3;
+  string language = 4;
+}
+
+message UpdateTranscriptionResponse {
+  bool success = 1;
+}
+
+// Update Analysis (called by nlp-service)
+message UpdateAnalysisRequest {
+  string entry_id = 1;
+  string sentiment = 2; // positive, negative, neutral
+  repeated string emotions = 3; // joy, sadness, anger, etc.
+  repeated string keywords = 4;
+  string summary = 5;
+}
+
+message UpdateAnalysisResponse {
+  bool success = 1;
+}
+
+// Models
+message DiaryEntry {
+  string id = 1;
+  string user_id = 2;
+  string title = 3;
+  string audio_file_id = 4;
+  int32 duration_seconds = 5;
+  string transcription = 6;
+  repeated TranscriptionSegment segments = 7;
+  string language = 8;
+  string sentiment = 9;
+  repeated string emotions = 10;
+  repeated string keywords = 11;
+  repeated string tags = 12;
+  string summary = 13;
+  ProcessingStatus status = 14;
+  google.protobuf.Timestamp created_at = 15;
+  google.protobuf.Timestamp updated_at = 16;
+}
+
+message TranscriptionSegment {
+  int32 start_time_ms = 1;
+  int32 end_time_ms = 2;
+  string text = 3;
+}
+
+enum ProcessingStatus {
+  PROCESSING_STATUS_UNKNOWN = 0;
+  UPLOADED = 1;
+  TRANSCRIBING = 2;
+  TRANSCRIBED = 3;
+  ANALYZING = 4;
+  COMPLETED = 5;
+  FAILED = 6;
+}

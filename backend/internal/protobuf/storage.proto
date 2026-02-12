@@ -1,0 +1,100 @@
+syntax = "proto3";
+
+package storage;
+
+option go_package = "github.com/voice-diary/backend/internal/gen/storage";
+
+import "google/protobuf/timestamp.proto";
+
+// Storage Service
+service StorageService {
+  rpc GenerateUploadURL(GenerateUploadURLRequest) returns (GenerateUploadURLResponse);
+  rpc GenerateDownloadURL(GenerateDownloadURLRequest) returns (GenerateDownloadURLResponse);
+  rpc UploadFile(UploadFileRequest) returns (UploadFileResponse);
+  rpc DownloadFile(DownloadFileRequest) returns (DownloadFileResponse);
+  rpc DeleteFile(DeleteFileRequest) returns (DeleteFileResponse);
+  rpc GetFileInfo(GetFileInfoRequest) returns (GetFileInfoResponse);
+}
+
+// Generate Upload URL (presigned URL)
+message GenerateUploadURLRequest {
+  string user_id = 1;
+  string filename = 2;
+  string content_type = 3;
+  int64 file_size = 4;
+}
+
+message GenerateUploadURLResponse {
+  string upload_url = 1;
+  string file_id = 2;
+  int64 expires_in = 3;
+}
+
+// Generate Download URL (presigned URL)
+message GenerateDownloadURLRequest {
+  string file_id = 1;
+  string user_id = 2;
+}
+
+message GenerateDownloadURLResponse {
+  string download_url = 1;
+  int64 expires_in = 2;
+}
+
+// Upload File (direct upload for internal services)
+message UploadFileRequest {
+  string user_id = 1;
+  string filename = 2;
+  bytes content = 3;
+  string content_type = 4;
+}
+
+message UploadFileResponse {
+  string file_id = 1;
+  string url = 2;
+  int64 file_size = 3;
+}
+
+// Download File (direct download for internal services)
+message DownloadFileRequest {
+  string file_id = 1;
+  string user_id = 2;
+}
+
+message DownloadFileResponse {
+  bytes content = 1;
+  string filename = 2;
+  string content_type = 3;
+  int64 file_size = 4;
+}
+
+// Delete File
+message DeleteFileRequest {
+  string file_id = 1;
+  string user_id = 2;
+}
+
+message DeleteFileResponse {
+  bool success = 1;
+}
+
+// Get File Info
+message GetFileInfoRequest {
+  string file_id = 1;
+  string user_id = 2;
+}
+
+message GetFileInfoResponse {
+  FileInfo file_info = 1;
+}
+
+// Models
+message FileInfo {
+  string file_id = 1;
+  string user_id = 2;
+  string filename = 3;
+  string content_type = 4;
+  int64 file_size = 5;
+  string url = 6;
+  google.protobuf.Timestamp created_at = 7;
+}

@@ -1,0 +1,36 @@
+# Base Dockerfile for Go services with protobuf generation
+FROM golang:1.21-alpine AS builder
+
+# Install build dependencies including protoc
+RUN apk add --no-cache git protobuf protobuf-dev
+
+# Install Go protobuf plugins
+RUN go install google.golang.org/protobuf/cmd/protoc-gen-go@latest && \
+    go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@latest
+
+# Set working directory
+WORKDIR /app
+
+# Copy go mod files
+COPY go.mod ./
+
+# Download dependencies (this will create go.sum)
+RUN go mod download && go mod verify
+
+# Copy proto files
+COPY internal/protobuf ./internal/protobuf
+
+# Generate protobuf files
+RUN mkdir -p internal/gen && \
+    cd internal/protobuf && \
+    for proto in *.proto; do \
+        protoc \
+            --go_out=../gen \
+            --go_opt=paths=source_relative \
+            --go-grpc_out=../gen \
+            --go-grpc_opt=paths=source_relative \
+            "$proto" || exit 1; \
+    done
+
+# Copy all source code
+COPY . .
