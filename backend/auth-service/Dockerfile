@@ -1,45 +1,34 @@
 # Build stage
 FROM golang:1.22-alpine AS builder
 
-# Install build dependencies
-RUN apk add --no-cache git
+RUN apk add --no-cache git ca-certificates tzdata
 
-# Set working directory
 WORKDIR /app
 
-# Copy go mod files
-COPY go.mod ./
-COPY go.sum .//
+# Копируем go.mod и go.sum ПЕРВЫМИ (кэш слоёв Docker)
+COPY go.mod go.sum ./
 
-# Download dependencies (this will create go.sum)
-RUN go mod download && go mod verify
+# Копируем vendor - не нужен интернет при сборке!
+COPY vendor ./vendor
 
-# Copy internal directory (pkg and pre-generated protobuf)
+# Копируем локальные модули (gen/*)
 COPY internal ./internal
 
-# Copy service-specific code
+# Копируем код сервиса
 COPY auth-service ./auth-service
 
-# Set GOPRIVATE to prevent Go from trying to fetch our internal modules from the internet
-ENV GOPRIVATE=github.com/voice-diary/backend
-
-# Build the application
-RUN CGO_ENABLED=0 GOOS=linux go build -mod=mod -v -o /app/app ./auth-service/cmd/main.go
+# Сборка с -mod=vendor - использует локальный vendor/
+RUN CGO_ENABLED=0 GOOS=linux go build -mod=vendor -o /app/app ./auth-service/cmd/main.go
 
 # Runtime stage
-FROM alpine:latest
+FROM alpine:3.19
 
-# Install ca-certificates for HTTPS
-RUN apk --no-cache add ca-certificates
+RUN apk --no-cache add ca-certificates tzdata
 
-# Set working directory
 WORKDIR /root/
 
-# Copy binary from builder
 COPY --from=builder /app/app ./app
 
-# Expose ports
 EXPOSE 50051 8081
 
-# Run the application
 CMD ["./app"]

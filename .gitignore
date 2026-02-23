@@ -12,8 +12,6 @@
 *.test
 *.out
 go.work
-vendor/
-backend/internal/gen/
 
 # Python
 __pycache__/

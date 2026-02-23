@@ -4,7 +4,7 @@ import logging
 import tempfile
 from contextlib import asynccontextmanager
 
-import whisper
+from faster_whisper import WhisperModel
 import pika
 from fastapi import FastAPI, HTTPException
 from minio import Minio
@@ -31,10 +31,10 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting transcription service...")
     
-    # Load Whisper model
+    # Load Whisper model (faster-whisper uses int8 on CPU for efficiency)
     model_name = os.getenv("WHISPER_MODEL", "base")
     logger.info(f"Loading Whisper model: {model_name}")
-    whisper_model = whisper.load_model(model_name)
+    whisper_model = WhisperModel(model_name, device="cpu", compute_type="int8")
     logger.info("Whisper model loaded successfully")
     
     # Initialize MinIO client
@@ -138,28 +138,26 @@ def process_transcription_task(ch, method, properties, body):
                 minio_client.fget_object(bucket_name, object_name, temp_path)
                 logger.info(f"Downloaded audio file: {object_name}")
                 
-                # Transcribe audio with optimized parameters for better quality
-                result = whisper_model.transcribe(
-                    temp_path, 
-                    language="russian",
-                    temperature=0.2,  # Slightly less deterministic for better handling of diverse speech
-                    beam_size=5,      # Better search
-                    best_of=5,        # More candidates
-                    condition_on_previous_text=False,  # Don't force literary style
-                    initial_prompt="Личный голосовой дневник на разговорном русском языке со сленгом и ненормативной лексикой."
+                # Transcribe audio (faster-whisper API)
+                seg_iter, info = whisper_model.transcribe(
+                    temp_path,
+                    language="ru",
+                    beam_size=5,
+                    initial_prompt="Личный голосовой дневник на разговорном русском языке."
                 )
-                
-                transcription = result["text"]
-                language = result.get("language", "ru")
-                
-                # Extract segments
+
                 segments = []
-                for segment in result.get("segments", []):
+                transcription_parts = []
+                for segment in seg_iter:
+                    transcription_parts.append(segment.text)
                     segments.append({
-                        "start_time_ms": int(segment["start"] * 1000),
-                        "end_time_ms": int(segment["end"] * 1000),
-                        "text": segment["text"]
+                        "start_time_ms": int(segment.start * 1000),
+                        "end_time_ms": int(segment.end * 1000),
+                        "text": segment.text
                     })
+
+                transcription = " ".join(transcription_parts)
+                language = info.language
                 
                 logger.info(f"Transcription completed for entry: {entry_id}")
                 
