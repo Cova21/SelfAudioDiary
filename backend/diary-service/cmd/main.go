@@ -73,6 +73,13 @@ func main() {
 		}
 	}()
 
+	// Start consuming NLP analysis results
+	go func() {
+		if err := diaryService.StartNLPConsumer(); err != nil {
+			logger.Error("Failed to start NLP consumer", zap.Error(err))
+		}
+	}()
+
 	// Initialize gRPC handler
 	handler := grpcHandler.NewDiaryHandler(diaryService)
 

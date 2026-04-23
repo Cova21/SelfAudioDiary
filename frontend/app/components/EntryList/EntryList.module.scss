@@ -2,10 +2,21 @@
   margin-top: 2rem;
 }
 
+.headingRow {
+  display: flex;
+  align-items: baseline;
+  gap: 0.75rem;
+  margin-bottom: 1.5rem;
+}
+
 .heading {
   font-size: 1.5rem;
-  margin-bottom: 1.5rem;
   color: var(--color-text);
+}
+
+.resultCount {
+  font-size: 0.9rem;
+  color: var(--color-text-secondary);
 }
 
 .loading {
@@ -65,7 +76,7 @@
 
   &:hover {
     border-color: var(--color-primary);
-    box-shadow: 0 4px 20px rgba(255, 0, 0, 0.1);
+    box-shadow: 0 4px 20px rgba(139, 92, 246, 0.15);
   }
 }
 
@@ -73,12 +84,68 @@
   display: flex;
   justify-content: space-between;
   align-items: start;
+  gap: 1rem;
   margin-bottom: 1rem;
+}
+
+.titleRow {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  min-width: 0;
+  flex: 1;
+}
+
+.renameBtn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 0.85rem;
+  opacity: 0;
+  padding: 0.15rem 0.3rem;
+  border-radius: 4px;
+  transition: opacity 0.15s;
+  flex-shrink: 0;
+
+  .entry:hover & {
+    opacity: 0.5;
+  }
+
+  &:hover {
+    opacity: 1 !important;
+    background: var(--color-bg-tertiary);
+  }
+}
+
+.editTitleRow {
+  flex: 1;
+  min-width: 0;
+}
+
+.editTitleInput {
+  width: 100%;
+  padding: 0.4rem 0.6rem;
+  background: var(--color-bg-tertiary);
+  border: 1.5px solid var(--color-primary);
+  border-radius: 6px;
+  color: var(--color-text);
+  font-size: 1.2rem;
+  font-weight: 600;
+  font-family: inherit;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(139, 92, 246, 0.15);
+
+  &:disabled {
+    opacity: 0.5;
+  }
 }
 
 .entryTitle {
   font-size: 1.25rem;
   font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
   color: var(--color-text);
 }
 
@@ -193,6 +260,11 @@
   &.negative {
     border-color: var(--color-error);
     color: var(--color-error);
+  }
+
+  &.neutral {
+    border-color: var(--color-accent);
+    color: var(--color-accent);
   }
 }
 

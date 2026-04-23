@@ -31,10 +31,10 @@ async def lifespan(app: FastAPI):
     # Startup
     logger.info("Starting transcription service...")
     
-    # Load Whisper model (faster-whisper uses int8 on CPU for efficiency)
-    model_name = os.getenv("WHISPER_MODEL", "base")
-    logger.info(f"Loading Whisper model: {model_name}")
-    whisper_model = WhisperModel(model_name, device="cpu", compute_type="int8")
+    model_name = os.getenv("WHISPER_MODEL", "medium")
+    compute_type = os.getenv("WHISPER_COMPUTE_TYPE", "float32")
+    logger.info(f"Loading Whisper model: {model_name} (compute_type={compute_type})")
+    whisper_model = WhisperModel(model_name, device="cpu", compute_type=compute_type)
     logger.info("Whisper model loaded successfully")
     
     # Initialize MinIO client
@@ -130,30 +130,46 @@ def process_transcription_task(ch, method, properties, body):
         bucket_name = os.getenv("MINIO_BUCKET", "voice-diary-audio")
         object_name = f"{user_id}/{audio_file_id}"
         
-        # Create temporary file
-        with tempfile.NamedTemporaryFile(suffix=".audio", delete=False) as temp_file:
+        with tempfile.NamedTemporaryFile(suffix=".webm", delete=False) as temp_file:
             temp_path = temp_file.name
             
             try:
                 minio_client.fget_object(bucket_name, object_name, temp_path)
                 logger.info(f"Downloaded audio file: {object_name}")
                 
-                # Transcribe audio (faster-whisper API)
                 seg_iter, info = whisper_model.transcribe(
                     temp_path,
                     language="ru",
                     beam_size=5,
-                    initial_prompt="Личный голосовой дневник на разговорном русском языке."
+                    best_of=5,
+                    temperature=0,
+                    initial_prompt=(
+                        "Это личный голосовой дневник. "
+                        "Разговорная русская речь с размышлениями, заметками и наблюдениями."
+                    ),
+                    vad_filter=True,
+                    vad_parameters=dict(
+                        min_silence_duration_ms=300,
+                        speech_pad_ms=200,
+                    ),
+                    condition_on_previous_text=True,
+                    compression_ratio_threshold=2.4,
+                    log_prob_threshold=-1.0,
+                    no_speech_threshold=0.6,
+                    word_timestamps=False,
                 )
 
                 segments = []
                 transcription_parts = []
                 for segment in seg_iter:
-                    transcription_parts.append(segment.text)
+                    text = segment.text.strip()
+                    if not text:
+                        continue
+                    transcription_parts.append(text)
                     segments.append({
                         "start_time_ms": int(segment.start * 1000),
                         "end_time_ms": int(segment.end * 1000),
-                        "text": segment.text
+                        "text": text,
                     })
 
                 transcription = " ".join(transcription_parts)

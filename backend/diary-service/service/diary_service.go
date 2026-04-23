@@ -191,6 +191,46 @@ func (s *DiaryService) sendToNLPQueue(entryID, transcription string) error {
 	return nil
 }
 
+// StartNLPConsumer starts consuming NLP analysis results
+func (s *DiaryService) StartNLPConsumer() error {
+	queueName := "nlp_completed"
+
+	if err := s.mq.DeclareQueue(queueName); err != nil {
+		return fmt.Errorf("failed to declare queue: %w", err)
+	}
+
+	logger.Info("Starting NLP consumer", zap.String("queue", queueName))
+
+	return s.mq.Consume(queueName, func(body []byte) error {
+		var message struct {
+			EntryID   string   `json:"entry_id"`
+			Sentiment string   `json:"sentiment"`
+			Emotions  []string `json:"emotions"`
+			Keywords  []string `json:"keywords"`
+			Summary   string   `json:"summary"`
+		}
+
+		if err := json.Unmarshal(body, &message); err != nil {
+			logger.Error("Failed to unmarshal NLP message", zap.Error(err))
+			return err
+		}
+
+		logger.Info("Received NLP result",
+			zap.String("entry_id", message.EntryID),
+			zap.String("sentiment", message.Sentiment),
+			zap.Strings("emotions", message.Emotions))
+
+		if err := s.entryRepo.UpdateAnalysis(message.EntryID, message.Sentiment, message.Summary, message.Emotions, message.Keywords); err != nil {
+			logger.Error("Failed to update entry with analysis", zap.Error(err))
+			return err
+		}
+
+		logger.Info("Updated entry with NLP analysis", zap.String("entry_id", message.EntryID))
+
+		return nil
+	})
+}
+
 // StartTranscriptionConsumer starts consuming transcription results
 func (s *DiaryService) StartTranscriptionConsumer() error {
 	queueName := "transcription_completed"
